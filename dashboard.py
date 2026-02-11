@@ -213,14 +213,14 @@ if filtered_results is not None:
             st.plotly_chart(fig_pca_label, use_container_width=True)
 
         with col_pca2:
-            fig_pca_cluster = px.scatter(
+            fig_pca_pattern = px.scatter(
                 filtered_results, x='PCA1', y='PCA2', 
-                color='Cluster', 
+                color='Inferred_Pattern' if has_pattern else 'Cluster', 
                 hover_data=hover_cols,
-                color_discrete_sequence=px.colors.qualitative.Safe,
-                title="Color by Mathematical Cluster"
+                color_discrete_sequence=px.colors.qualitative.Plotly,
+                title="Color by Demand Pattern" if has_pattern else "Color by Mathematical Cluster"
             )
-            st.plotly_chart(fig_pca_cluster, use_container_width=True)
+            st.plotly_chart(fig_pca_pattern, use_container_width=True)
 
         st.divider()
         st.markdown("### 📊 Signal Distribution Analysis")
