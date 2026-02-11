@@ -66,74 +66,90 @@ class ForecastScoreEngine:
     def score(self, input_df, cluster_col='Cluster'):
         """
         Main entry point.
-        Input: DataFrame with features + Cluster column (+ optional Inferred_Pattern)
+        Input: DataFrame with features + Cluster column + Inferred_Pattern
         Output: (result_df, anova_df) tuple
-            - result_df: input + 'Forecastability_Score', 'Forecastability_Label'
+            - result_df: input + 'Forecastability_Score', 'Score_Bucket', 'Forecastability_Label'
             - anova_df: ANOVA F-stat validation results
         """
         df = input_df.copy()
 
-        # 1. Compute Composite Score Per SKU
+        # 1. Compute Composite Score Per SKU (Same as before)
         scaler = MinMaxScaler()
         feature_cols = [c for c in df.columns if c in self.feature_polarity]
 
-        # Normalize all features 0-1
         df_norm = df.copy()
         df_norm[feature_cols] = scaler.fit_transform(df[feature_cols])
 
-        # Calculate weighted group scores
         scores = np.zeros(len(df))
-
         for group, features in self.feature_groups.items():
             group_score = np.zeros(len(df))
             valid_feats = 0
-
             for f in features:
-                if f not in df.columns:
-                    continue
+                if f not in df.columns: continue
                 polarity = self.feature_polarity.get(f, 0)
-
-                if polarity == 0:
-                    continue
-
+                if polarity == 0: continue
                 val = df_norm[f].values
-                if polarity == -1:
-                    val = 1 - val  # Flip so higher is better
-
+                if polarity == -1: val = 1 - val 
                 group_score += val
                 valid_feats += 1
-
             if valid_feats > 0:
                 group_score /= valid_feats
                 scores += group_score * self.group_weight
 
         df['Forecastability_Score'] = scores
 
-        # 2. Assign Labels based on Cluster Means (tercile split)
-        cluster_scores = df.groupby(cluster_col)['Forecastability_Score'].mean()
-        sorted_clusters = cluster_scores.sort_values(ascending=False).index.tolist()
+        # 2. SCENARIO A: Score Buckets (Quartiles)
+        # Q1 = Hardest (Low score), Q4 = Easiest (High score)
+        df['Score_Bucket'] = pd.qcut(df['Forecastability_Score'], 4, labels=['Q1', 'Q2', 'Q3', 'Q4'])
+        
+        # Point mapping for Bucket
+        bucket_points = {'Q1': 0, 'Q2': 1, 'Q3': 2, 'Q4': 3}
 
+        # 3. SCENARIO B: Pattern Points
+        # Weights for patterns based on inherent difficulty
+        pattern_points_map = {
+            'Smooth': 1, 'Seasonal': 1, 'Trending': 1,
+            'Intermittent': -1, 'Lumpy': -1, 'Erratic': -1,
+            'New_Product': 0
+        }
+        
+        # 4. SCENARIO C: Cluster Points
+        # Rank clusters by mean score
+        cluster_means = df.groupby(cluster_col)['Forecastability_Score'].mean()
+        sorted_clusters = cluster_means.sort_values(ascending=False).index.tolist()
+        
         n_clusters = len(sorted_clusters)
-        chunk_size = int(np.ceil(n_clusters / 3))
+        top_split = int(np.ceil(n_clusters / 3))
+        bot_split = n_clusters - top_split
+        
+        cluster_points_map = {}
+        for i, c in enumerate(sorted_clusters):
+            if i < top_split:
+                cluster_points_map[c] = 1 # Top tier
+            elif i >= bot_split:
+                cluster_points_map[c] = -1 # Bottom tier
+            else:
+                cluster_points_map[c] = 0 # Mid tier
 
-        easy_clusters = sorted_clusters[:chunk_size]
-        mod_clusters = sorted_clusters[chunk_size: 2 * chunk_size]
-        hard_clusters = sorted_clusters[2 * chunk_size:]
+        # 5. COMBINE SCENARIOS
+        def calculate_label(row):
+            pts = bucket_points.get(row['Score_Bucket'], 0) # Base points (0-3)
+            pts += pattern_points_map.get(row.get('Inferred_Pattern', 'Erratic'), -1) # Pattern adjustment
+            pts += cluster_points_map.get(row[cluster_col], 0) # Cluster adjustment
+            
+            # Final thresholding
+            if pts >= 4:
+                return 'Easy'
+            elif pts >= 2:
+                return 'Moderate'
+            else:
+                return 'Hard'
 
-        label_map = {}
-        for c in easy_clusters:
-            label_map[c] = 'Easy'
-        for c in mod_clusters:
-            label_map[c] = 'Moderate'
-        for c in hard_clusters:
-            label_map[c] = 'Hard'
+        df['Forecastability_Label'] = df.apply(calculate_label, axis=1)
 
-        df['Forecastability_Label'] = df[cluster_col].map(label_map)
-
-        # 3. Validate with ANOVA F-stat
+        # 6. Validate with ANOVA F-stat
         print("Validating with ANOVA F-stats...")
         anova_results = []
-
         groups = [df[df['Forecastability_Label'] == label] for label in ['Easy', 'Moderate', 'Hard']]
         groups = [g for g in groups if len(g) > 0]
 
@@ -143,14 +159,9 @@ class ForecastScoreEngine:
                 try:
                     f_stat, p_val = f_oneway(*vals)
                     anova_results.append({'Feature': feat, 'F_Stat': f_stat, 'P_Value': p_val})
-                except:
-                    pass
-
+                except: pass
             anova_df = pd.DataFrame(anova_results).sort_values('F_Stat', ascending=False)
-            print("Top 5 Discriminative Features:")
-            print(anova_df.head(5).to_string(index=False))
         else:
-            print("Not enough categories for ANOVA (K < 2).")
             anova_df = pd.DataFrame()
 
         return df, anova_df

@@ -314,6 +314,13 @@ if filtered_results is not None:
                 st.metric("Trend Strength", f"{row.get('trend_strength', 0):.2f}")
                 st.metric("Seasonality", f"{row.get('seasonal_strength', 0):.2f}")
                 st.metric("Forecast Score", f"{row.get('Forecastability_Score', 0):.3f}")
+                st.write(f"**Score Bucket:** {row.get('Score_Bucket', 'N/A')}")
+                
+                st.divider()
+                st.caption("🔍 Label Evidence")
+                st.write("- **Pattern:** " + ("✅ Stable" if row.get('Inferred_Pattern') in ['Smooth', 'Seasonal', 'Trending'] else "⚠️ Erratic"))
+                st.write("- **Cluster:** " + ("✅ Strong" if row.get('Cluster') in [0, 1] else "⚖️ Neutral")) # Simplified placeholder for cluster power
+                st.write(f"- **Bucket:** {row.get('Score_Bucket')}")
 
 else:
     st.info("👈 Please load data using the sidebar.")
