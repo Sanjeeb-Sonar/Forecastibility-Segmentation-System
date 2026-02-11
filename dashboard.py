@@ -7,8 +7,9 @@ import time
 
 # Import Analysis Pipeline
 from feature_extraction import FeatureExtractionEngine
+from pattern_inference import PatternInferenceEngine
 from segmentation import SegmentationEngine
-from forecastability import ForecastabilityClassifier
+from forecast_score import ForecastScoreEngine
 
 # Page Config
 st.set_page_config(page_title="Demand Forecasting Manager", layout="wide", initial_sidebar_state="expanded")
@@ -33,26 +34,33 @@ if 'data_source' not in st.session_state:
 
 # --- PIPELINE FUNCTION ---
 def run_full_pipeline(df):
+    """Run the complete modular pipeline: Features → Patterns → Clusters → Scores"""
     status_text = st.empty()
     progress_bar = st.progress(0)
     
     try:
         # 1. Feature Extraction
-        status_text.text("Extracting Features (this may take a moment)...")
+        status_text.text("Step 1/4: Extracting 35 features...")
         feature_engine = FeatureExtractionEngine()
         features_df = feature_engine.extract_features(df)
-        progress_bar.progress(40)
+        progress_bar.progress(25)
         
-        # 2. Segmentation
-        status_text.text("Running Segmentation Engine...")
+        # 2. Pattern Inference
+        status_text.text("Step 2/4: Inferring demand patterns (multi-signal)...")
+        pattern_engine = PatternInferenceEngine()
+        pattern_df = pattern_engine.infer_patterns(features_df)
+        progress_bar.progress(50)
+        
+        # 3. Segmentation (Clustering)
+        status_text.text("Step 3/4: Running cluster segmentation...")
         seg_engine = SegmentationEngine(min_k=2, max_k=8, n_bootstrap=20)
-        segmented_df = seg_engine.run_segmentation(features_df)
-        progress_bar.progress(70)
+        segmented_df = seg_engine.run_segmentation(pattern_df)
+        progress_bar.progress(75)
         
-        # 3. Classification
-        status_text.text("Classifying Forecastability...")
-        classifier = ForecastabilityClassifier()
-        final_df, _ = classifier.classify(segmented_df)
+        # 4. Forecast Score
+        status_text.text("Step 4/4: Computing forecastability scores...")
+        score_engine = ForecastScoreEngine()
+        final_df, _ = score_engine.score(segmented_df)
         progress_bar.progress(100)
         
         status_text.success("Analysis Complete!")
@@ -72,18 +80,17 @@ with st.sidebar:
     source_option = st.radio("Select Source:", ["Use Demo Data", "Upload CSV"])
     
     if source_option == "Upload CSV":
+        st.caption("Upload a CSV with exactly 3 columns: **Date**, **SKU**, **Sales**")
         uploaded_file = st.file_uploader("Upload Sales Data (CSV)", type=['csv'])
         if uploaded_file is not None:
-            # Load Raw Data
             try:
                 raw_df = pd.read_csv(uploaded_file)
-                # Validation
                 required_cols = ['Date', 'SKU', 'Sales']
                 if not all(col in raw_df.columns for col in required_cols):
                     st.error(f"CSV must contain columns: {required_cols}")
                 else:
                     raw_df['Date'] = pd.to_datetime(raw_df['Date'])
-                    st.success(f"Loaded {len(raw_df)} rows.")
+                    st.success(f"Loaded {len(raw_df)} rows, {raw_df['SKU'].nunique()} SKUs.")
                     
                     if st.button("🚀 Run Segmentation Pipeline"):
                         with st.spinner("Processing your data..."):
@@ -117,34 +124,25 @@ with st.sidebar:
         
         # 1. Forecastability Filter
         cats = ['Easy', 'Moderate', 'Hard']
-        selected_cats = st.multiselect("Category", cats, default=cats)
+        selected_cats = st.multiselect("Forecastability", cats, default=cats)
         
-        # 2. Cluster Filter (Use Nature if available)
-        if 'Cluster_Nature' in results_df.columns:
-            cluster_col = 'Cluster_Nature'
-        else:
-            cluster_col = 'Cluster'
-            
-        all_clusters = sorted(results_df[cluster_col].unique())
-        selected_clusters = st.multiselect("Cluster (Nature)", all_clusters, default=all_clusters)
+        # 2. Cluster Filter
+        all_clusters = sorted(results_df['Cluster'].unique())
+        selected_clusters = st.multiselect("Cluster", all_clusters, default=all_clusters)
         
-        # 3. Pattern Filter (Always available now via inference)
-        # User said "Demand Pattern should be calculated based on all 35 features.. that is what we are saying the clusters"
-        # So we might want to hide the ADI/CV inferred pattern to avoid confusion? 
-        # Or keep it as "Rules-based Pattern" vs "Cluster Pattern"
-        # Let's keep it but rename it "Rule-based Pattern" for clarity
-        if 'Pattern_Truth' in results_df.columns:
-            all_patterns = sorted(results_df['Pattern_Truth'].astype(str).unique())
+        # 3. Pattern Filter (from pattern inference)
+        if 'Inferred_Pattern' in results_df.columns:
+            all_patterns = sorted(results_df['Inferred_Pattern'].astype(str).unique())
             selected_patterns = st.multiselect("Demand Pattern (Inferred)", all_patterns, default=all_patterns)
         else:
             selected_patterns = []
             
         # Apply Filters
         mask = (results_df['Forecastability_Label'].isin(selected_cats)) & \
-               (results_df[cluster_col].isin(selected_clusters))
+               (results_df['Cluster'].isin(selected_clusters))
         
-        if selected_patterns and 'Pattern_Truth' in results_df.columns:
-            mask = mask & (results_df['Pattern_Truth'].isin(selected_patterns))
+        if selected_patterns and 'Inferred_Pattern' in results_df.columns:
+            mask = mask & (results_df['Inferred_Pattern'].isin(selected_patterns))
             
         filtered_results = results_df[mask]
         filtered_skus = filtered_results['SKU'].unique()
@@ -160,8 +158,7 @@ with st.sidebar:
 # --- MAIN DASHBOARD CONTENT ---
 if filtered_results is not None:
     
-    # Check if we have Pattern info for display
-    has_pattern = 'Pattern_Truth' in filtered_results.columns
+    has_pattern = 'Inferred_Pattern' in filtered_results.columns
 
     # TABS
     tab_overview, tab_drivers, tab_deepdive = st.tabs([
@@ -185,40 +182,61 @@ if filtered_results is not None:
         
         col_pca, col_stats = st.columns([2, 1])
         with col_pca:
-            # PCA Scatter
             hover_cols = ['SKU']
-            if has_pattern: hover_cols.append('Pattern_Truth')
+            if has_pattern:
+                hover_cols.append('Inferred_Pattern')
             
             # Determine symbol col
-            sym_col = 'Cluster_Nature' if 'Cluster_Nature' in filtered_results.columns else 'Cluster'
+            sym_col = 'Inferred_Pattern' if has_pattern else 'Cluster'
             
             fig_pca = px.scatter(
                 filtered_results, x='PCA1', y='PCA2', 
                 color='Forecastability_Label', symbol=sym_col,
                 hover_data=hover_cols,
                 color_discrete_map={'Easy': '#00CC96', 'Moderate': '#FFA15A', 'Hard': '#EF553B'},
-                title="Consumer Segmentation Map"
+                title="Segmentation Map (PCA)"
             )
             st.plotly_chart(fig_pca, use_container_width=True)
             
         with col_stats:
             st.subheader("Cluster Profile")
             st.caption("Average features per cluster")
-            cols_to_show = ['p_zero', 'cv', 'seasonal_strength', 'approx_entropy']
-            # Filter cols that exist
+            cols_to_show = ['p_zero', 'cv', 'seasonal_strength', 'approx_entropy', 'trend_strength']
             cols_to_show = [c for c in cols_to_show if c in filtered_results.columns]
             
-            group_col = 'Cluster_Nature' if 'Cluster_Nature' in filtered_results.columns else 'Cluster'
-            means = filtered_results.groupby(group_col)[cols_to_show].mean()
+            means = filtered_results.groupby('Cluster')[cols_to_show].mean()
             st.dataframe(means.style.format("{:.2f}").background_gradient(cmap='Blues'), height=400)
+
+        # Pattern Distribution
+        if has_pattern:
+            st.divider()
+            st.markdown("### 📊 Pattern Distribution")
+            col_p1, col_p2 = st.columns(2)
+            
+            with col_p1:
+                pattern_counts = filtered_results['Inferred_Pattern'].value_counts().reset_index()
+                pattern_counts.columns = ['Pattern', 'Count']
+                fig_pat = px.bar(pattern_counts, x='Pattern', y='Count', color='Pattern',
+                                title="Inferred Pattern Distribution")
+                st.plotly_chart(fig_pat, use_container_width=True)
+            
+            with col_p2:
+                # Pattern vs Forecastability cross-tab
+                cross = pd.crosstab(filtered_results['Inferred_Pattern'], 
+                                    filtered_results['Forecastability_Label'])
+                fig_cross = px.imshow(cross, text_auto=True, 
+                                     color_continuous_scale='Blues',
+                                     title="Pattern × Forecastability Heatmap")
+                st.plotly_chart(fig_cross, use_container_width=True)
 
     # --- TAB 2: DRIVERS ---
     with tab_drivers:
-        st.markdown("### 🔍 Why describes the segments?")
+        st.markdown("### 🔍 What Drives Forecastability?")
         col_rad, col_box = st.columns(2)
         
         with col_rad:
-            feat_candidates = ['cv', 'p_zero', 'trend_strength', 'seasonal_strength', 'approx_entropy', 'skewness']
+            feat_candidates = ['cv', 'p_zero', 'trend_strength', 'seasonal_strength', 
+                             'approx_entropy', 'skewness', 'acf_lag1', 'garch_like_vol']
             present_feats = [f for f in feat_candidates if f in filtered_results.columns]
             
             if present_feats:
@@ -227,20 +245,25 @@ if filtered_results is not None:
                 
                 fig_rad = px.line_polar(
                     df_melt, r='Value', theta='Feature', color='Forecastability_Label', line_close=True,
-                    color_discrete_map={'Easy': '#00CC96', 'Moderate': '#FFA15A', 'Hard': '#EF553B'}
+                    color_discrete_map={'Easy': '#00CC96', 'Moderate': '#FFA15A', 'Hard': '#EF553B'},
+                    title="Feature Radar by Category"
                 )
                 st.plotly_chart(fig_rad, use_container_width=True)
         
         with col_box:
-            # Feature Boxplots
-            st.caption("Distribution of features")
-            all_feats = [c for c in filtered_results.columns if c not in ['Date','SKU','Cluster','Forecastability_Label','PCA1','PCA2','Pattern_Truth']]
-            sel_feat = st.selectbox("Compare Feature:", all_feats, index=0 if len(all_feats)>0 else None)
+            st.caption("Distribution of features by forecastability")
+            exclude_cols = ['Date', 'SKU', 'Cluster', 'Forecastability_Label', 'Forecastability_Score',
+                          'PCA1', 'PCA2', 'Inferred_Pattern', 'Pattern_Confidence', 
+                          'Model_Used', 'Algorithm_Stability', 'Optimal_K']
+            all_feats = [c for c in filtered_results.columns if c not in exclude_cols 
+                        and filtered_results[c].dtype in ['float64', 'int64', 'float32', 'int32']]
+            sel_feat = st.selectbox("Compare Feature:", all_feats, index=0 if len(all_feats) > 0 else None)
             
             if sel_feat:
                 fig_box = px.box(
                     filtered_results, x='Forecastability_Label', y=sel_feat, color='Forecastability_Label',
-                    color_discrete_map={'Easy': '#00CC96', 'Moderate': '#FFA15A', 'Hard': '#EF553B'}
+                    color_discrete_map={'Easy': '#00CC96', 'Moderate': '#FFA15A', 'Hard': '#EF553B'},
+                    title=f"Distribution: {sel_feat}"
                 )
                 st.plotly_chart(fig_box, use_container_width=True)
 
@@ -249,24 +272,20 @@ if filtered_results is not None:
         st.markdown("### 📉 Historical Analysis")
         st.caption("Filtered View of Historical Sales")
         
-        # Active Filters Display
-        st.info(f"Viewing {len(filtered_skus)} SKUs. Filters: {', '.join(selected_cats)} | Clusters: {selected_clusters}")
+        st.info(f"Viewing {len(filtered_skus)} SKUs | Categories: {', '.join(selected_cats)}")
         
-        # Max Lines Check
         MAX_LINES = 100
         plot_data = filtered_sales
         if len(filtered_skus) > MAX_LINES:
-            st.warning(f"⚠️ High volume! showing random sample of {MAX_LINES} SKUs.")
+            st.warning(f"⚠️ High volume! Showing random sample of {MAX_LINES} SKUs.")
             sample_skus = np.random.choice(filtered_skus, MAX_LINES, replace=False)
             plot_data = filtered_sales[filtered_sales['SKU'].isin(sample_skus)]
         
-        # Merge Segments onto Sales for Coloring
         plot_data = plot_data.merge(filtered_results[['SKU', 'Forecastability_Label']], on='SKU', how='left')
         
-        # Multi-line Chart
         fig_hist = px.line(
             plot_data, x='Date', y='Sales', 
-            color='Forecastability_Label', line_group='SKU', # One line per SKU
+            color='Forecastability_Label', line_group='SKU',
             color_discrete_map={'Easy': '#00CC96', 'Moderate': '#FFA15A', 'Hard': '#EF553B'},
             title="Sales History (Filtered)"
         )
@@ -287,9 +306,14 @@ if filtered_results is not None:
                 row = filtered_results[filtered_results['SKU'] == sel_sku].iloc[0]
                 st.write(f"**Segment:** {row['Forecastability_Label']}")
                 st.write(f"**Cluster:** {row['Cluster']}")
-                if has_pattern: st.write(f"**Pattern:** {row['Pattern_Truth']}")
+                if has_pattern:
+                    st.write(f"**Pattern:** {row['Inferred_Pattern']}")
+                    st.write(f"**Confidence:** {row.get('Pattern_Confidence', 0):.2f}")
                 st.metric("Intermittency", f"{row.get('p_zero', 0):.2f}")
                 st.metric("Volatility (CV)", f"{row.get('cv', 0):.2f}")
+                st.metric("Trend Strength", f"{row.get('trend_strength', 0):.2f}")
+                st.metric("Seasonality", f"{row.get('seasonal_strength', 0):.2f}")
+                st.metric("Forecast Score", f"{row.get('Forecastability_Score', 0):.3f}")
 
 else:
     st.info("👈 Please load data using the sidebar.")

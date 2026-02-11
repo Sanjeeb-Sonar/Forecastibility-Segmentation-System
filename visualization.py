@@ -250,7 +250,10 @@ class VisualizationEngine:
         # Cluster ID | Forecastability Label | Size | Top Defining Features | Recommended Models
         
         summary = []
-        feature_cols = [c for c in full_df.columns if c not in ['Date', 'SKU', 'Cluster', 'Model_Used', 'Algorithm_Stability', 'Forecastability_Score', 'Forecastability_Label', 'PCA1', 'PCA2',  'Pattern_Truth']]
+        feature_cols = [c for c in full_df.columns if c not in ['Date', 'SKU', 'Cluster', 'Model_Used', 'Algorithm_Stability', 'Forecastability_Score', 'Forecastability_Label', 'PCA1', 'PCA2', 'Pattern_Truth', 'Inferred_Pattern', 'Pattern_Confidence', 'Cluster_Nature', 'Optimal_K']]
+    
+        # Ensure only numeric columns
+        feature_cols = [c for c in feature_cols if full_df[c].dtype in ['float64', 'int64', 'float32', 'int32']]
         
         global_mean = full_df[feature_cols].mean()
         global_std = full_df[feature_cols].std()

@@ -17,7 +17,8 @@ class FeatureExtractionEngine:
     def extract_features(self, df, date_col='Date', sku_col='SKU', sales_col='Sales'):
         """
         Main entry point. Expects a DataFrame with Date, SKU, Sales columns.
-        Returns a DataFrame with 1 row per SKU and 35+ columns of features.
+        Returns a DataFrame with 1 row per SKU and 35 numeric feature columns.
+        No pattern labels are inferred here — that is handled by pattern_inference.py.
         """
         features_list = []
         unique_skus = df[sku_col].unique()
@@ -30,44 +31,12 @@ class FeatureExtractionEngine:
             
             # Skip if too short
             if len(series) < self.seasonal_period * 2:
-                # Fill with NaNs or basic stats only if desperate
-                # For this demo we assume sufficiency or handle in post-processing
                 pass 
 
             # Calculate individual features
             try:
                 sku_feats = self._calculate_sku_features(series)
                 sku_feats[sku_col] = sku
-                
-                # Infer Demand Pattern (Syntetos-Boylan Classification)
-                # Smooth: ADI < 1.32 and CV^2 < 0.49
-                # Intermittent: ADI >= 1.32 and CV^2 < 0.49
-                # Erratic: ADI < 1.32 and CV^2 >= 0.49
-                # Lumpy: ADI >= 1.32 and CV^2 >= 0.49
-                
-                adi = sku_feats.get('adi', 1.0)
-                cv = sku_feats.get('cv', 0.0)
-                cv2 = cv ** 2
-                
-                if adi < 1.32:
-                    if cv2 < 0.49:
-                        inferred_pattern = 'Smooth'
-                    else:
-                        inferred_pattern = 'Erratic'
-                else:
-                    if cv2 < 0.49:
-                        inferred_pattern = 'Intermittent'
-                    else:
-                        inferred_pattern = 'Lumpy'
-                        
-                sku_feats['Pattern_Truth'] = inferred_pattern
-
-                # Preserve Original Pattern_Truth if exists (optional overwrite)
-                if 'Pattern_Truth' in df.columns:
-                     # If user provided it, we trust them? Or we overwrite?
-                     # Let's keep user provided if available, else use inferred.
-                     pass 
-                    
                 features_list.append(sku_feats)
             except Exception as e:
                 print(f"Error processing SKU {sku}: {e}")
@@ -76,11 +45,7 @@ class FeatureExtractionEngine:
         features_df = pd.DataFrame(features_list)
         
         # Move SKU to first column
-        # Move SKU (and Pattern_Truth) to first columns
         cols = [sku_col]
-        if 'Pattern_Truth' in features_df.columns:
-            cols.append('Pattern_Truth')
-            
         remaining_cols = [c for c in features_df.columns if c not in cols]
         features_df = features_df[cols + remaining_cols]
         

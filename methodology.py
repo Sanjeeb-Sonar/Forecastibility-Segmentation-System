@@ -5,64 +5,39 @@ class MethodologyDocumentation:
 FORECASTABILITY SEGMENTATION SYSTEM — METHODOLOGY REPORT
 ================================================================================
 
-1. FEATURE EXTRACTION STRATEGY
+1. DATA FOUNDATION
+--------------------------------------------------------------------------------
+The system accepts raw transactional data with exactly 3 columns: Date, SKU,
+and Sales. This ensures maximum flexibility for external data uploads.
+
+2. FEATURE EXTRACTION STRATEGY
 --------------------------------------------------------------------------------
 We extract 35 time series features across 10 dimensions to capture the full 
-"DNA" of each SKU's demand pattern. A single metric (like CV) is insufficient.
+"DNA" of each SKU. A single metric (like CV) is insufficient for complex demand.
 
-- Basic Stats: Mean, Std, CV, Median (Distribution shape)
-- Demand Pattern: ADI, % Zeros (Intermittency detection for Croston/SBA)
-- Trend: Strength (STL), Slope, Linearity (Direction & consistency)
-- Seasonality: Strength, Periodicity, Peak-to-Trough (Cyclical patterns)
-- Volatility: Rolling CV, GARCH-proxy (Is variance changing?)
-- Autocorrelation: ACF Lag 1/12, PACF (Memory & predictability)
-- Information Theory: Approx/Sample/Spectral Entropy (Randomness/Complexity)
-- Stability: Level/Trend/Seasonal stability over time
-- Shape: Skewness, Kurtosis, Tail Heaviness (Extreme value risk)
-- Changepoints: Structural breaks in demand history
-
-2. ROBUST SEGMENTATION ENGINE
+3. MULTI-SIGNAL PATTERN INFERENCE
 --------------------------------------------------------------------------------
-Standard K-Means assumes spherical clusters and is sensitive to outliers. 
-We use a robust multi-algorithm approach:
+Instead of relying on a simplistic 2-feature quadrant (ADI/CV²), we use a 
+dedicated Pattern Inference Engine. It evaluates all 35 features using 
+multi-signal sigmoid scoring to classify SKUs into 7 archetypes: 
+(Smooth, Seasonal, Intermittent, Lumpy, Trending, Erratic, New Product).
 
-- Outlier Capping: Features clipped at 3-sigma to prevent distortion
-- PCA: Dimensionality reduction (90% variance) to remove noise
-- Multi-Algorithm: We test K-Means, Agglomerative (Ward), and GMM
-- Multi-Metric Selection: Optimal K selected via majority vote of 
-  Silhouette, Calinski-Harabasz, and Davies-Bouldin indices.
-- Stability Analysis: Bootstrap resampling (20x) confirms clusters are real,
-  not artifacts of sampling.
-
-3. FORECASTABILITY CLASSIFIER (Composite Score)
+4. ROBUST SEGMENTATION ENGINE
 --------------------------------------------------------------------------------
-We determine "Easy", "Moderate", and "Hard" labels using a purely feature-driven
-composite score, avoiding black-box dependencies.
+Standard K-Means is sensitive to outliers. We use a robust approach:
+- PCA: Dimensionality reduction (90% variance) to remove noise.
+- Multi-Algorithm Sweep: Testing K-Means, Agglomerative, and GMM.
+- Stability Analysis: Resampling (20x) to ensure cluster reliability.
 
-- Polarity Alignment: All 35 features are aligned so that Higher = Easier.
-  (e.g., Entropy is flipped: 1 - Entropy).
-- Group-Balanced Weighting: Each of the 10 feature groups gets equal weight 
-  (1/10). This ensures no single dimension (like Volatility) dominates.
-- Labelling: Clusters are ranked by mean score and split into terciles.
-- Validation: ANOVA F-stats confirm which features truly discriminate.
-
-4. INTERPRETING THE CLASSES
+5. FORECASTABILITY CLASSIFIER (Composite Score)
 --------------------------------------------------------------------------------
-[Easy to Forecast]
-- Characteristics: High seasonality, strong linear trend, low entropy, low CV.
-- Recommended Models: Holt-Winters, SARIMA, Prophet, or even Naive.
-- Strategy: Automate completely.
+We determine "Easy", "Moderate", and "Hard" labels using a feature-driven 
+composite score. Each feature is polarity-aligned (Higher = Easier) and 
+averaged within 11 groups for balanced representation.
 
-[Moderate to Forecast]
-- Characteristics: Some signal but high noise, or changing regimes.
-- Recommended Models: SES, Theta, MAPA, or LightGBM/XGBoost.
-- Strategy: Monitor errors, lightweight human review on exceptions.
-
-[Hard to Forecast]
-- Characteristics: Intermittent/Lumpy (High % Zero), High Entropy, Structural Breaks.
-- Recommended Models: Croston, SBA, ADIDA (if intermittent), or just Moving Average.
-- Strategy: Don't trust the point forecast. Use safety stock buffering. 
-  "Forecast the risk, not the number."
+6. INTERPRETING THE CLASSES
+--------------------------------------------------------------------------------
+... [Same as before] ...
 
 ================================================================================
 """
