@@ -43,24 +43,28 @@ def run_full_pipeline(df):
         status_text.text("Step 1/4: Extracting 35 features...")
         feature_engine = FeatureExtractionEngine()
         features_df = feature_engine.extract_features(df)
+        features_df.to_csv("features_output.csv", index=False)
         progress_bar.progress(25)
         
         # 2. Pattern Inference
         status_text.text("Step 2/4: Inferring demand patterns (multi-signal)...")
         pattern_engine = PatternInferenceEngine()
         pattern_df = pattern_engine.infer_patterns(features_df)
+        pattern_df.to_csv("pattern_output.csv", index=False)
         progress_bar.progress(50)
         
         # 3. Segmentation (Clustering)
         status_text.text("Step 3/4: Running cluster segmentation...")
         seg_engine = SegmentationEngine(min_k=2, max_k=8, n_bootstrap=20)
         segmented_df = seg_engine.run_segmentation(pattern_df)
+        segmented_df.to_csv("segmented_output.csv", index=False)
         progress_bar.progress(75)
         
         # 4. Forecast Score
         status_text.text("Step 4/4: Computing forecastability scores...")
         score_engine = ForecastScoreEngine()
         final_df, _ = score_engine.score(segmented_df)
+        final_df.to_csv("final_output.csv", index=False)
         progress_bar.progress(100)
         
         status_text.success("Analysis Complete!")
@@ -249,15 +253,29 @@ if filtered_results is not None:
             present_feats = [f for f in feat_candidates if f in filtered_results.columns]
             
             if present_feats:
-                df_rad = filtered_results.groupby('Forecastability_Label')[present_feats].mean().reset_index()
-                df_melt = df_rad.melt(id_vars='Forecastability_Label', var_name='Feature', value_name='Value')
+                # Group by label and get means
+                df_rad = filtered_results.groupby('Forecastability_Label')[present_feats].mean()
                 
-                fig_rad = px.line_polar(
-                    df_melt, r='Value', theta='Feature', color='Forecastability_Label', line_close=True,
-                    color_discrete_map={'Easy': '#00CC96', 'Moderate': '#FFA15A', 'Hard': '#EF553B'},
-                    title="Feature Radar by Category"
-                )
-                st.plotly_chart(fig_rad, use_container_width=True)
+                # Apply scaling so all axes are 0-1 (Radar Chart Fix)
+                from sklearn.preprocessing import MinMaxScaler
+                scaler = MinMaxScaler()
+                if not df_rad.empty:
+                    df_rad_scaled = pd.DataFrame(
+                        scaler.fit_transform(df_rad),
+                        columns=df_rad.columns,
+                        index=df_rad.index
+                    ).reset_index()
+                    
+                    df_melt = df_rad_scaled.melt(id_vars='Forecastability_Label', var_name='Feature', value_name='Value')
+                    
+                    fig_rad = px.line_polar(
+                        df_melt, r='Value', theta='Feature', color='Forecastability_Label', line_close=True,
+                        color_discrete_map={'Easy': '#00CC96', 'Moderate': '#FFA15A', 'Hard': '#EF553B'},
+                        title="Normalized Feature DNA (Radar)"
+                    )
+                    st.plotly_chart(fig_rad, use_container_width=True)
+                else:
+                    st.info("No data available for radar chart.")
         
         with col_box:
             st.caption("Distribution of features by forecastability")
