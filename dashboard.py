@@ -193,54 +193,100 @@ if filtered_results is not None:
         
         st.divider()
         
-        col_pca, col_stats = st.columns([2, 1])
-        with col_pca:
-            hover_cols = ['SKU']
-            if has_pattern:
-                hover_cols.append('Inferred_Pattern')
-            
-            # Determine symbol col
-            sym_col = 'Inferred_Pattern' if has_pattern else 'Cluster'
-            
-            fig_pca = px.scatter(
+        st.markdown("### 🗺️ Segmentation Topology")
+        col_pca1, col_pca2 = st.columns(2)
+        
+        hover_cols = ['SKU']
+        if has_pattern:
+            hover_cols.append('Inferred_Pattern')
+        if 'Score_Bucket' in filtered_results.columns:
+            hover_cols.append('Score_Bucket')
+
+        with col_pca1:
+            fig_pca_label = px.scatter(
                 filtered_results, x='PCA1', y='PCA2', 
-                color='Forecastability_Label', symbol=sym_col,
+                color='Forecastability_Label', symbol='Cluster',
                 hover_data=hover_cols,
                 color_discrete_map={'Easy': '#00CC96', 'Moderate': '#FFA15A', 'Hard': '#EF553B'},
-                title="Segmentation Map (PCA)"
+                title="Color by Category (Easy/Mod/Hard)"
             )
-            st.plotly_chart(fig_pca, use_container_width=True)
-            
-        with col_stats:
-            st.subheader("Cluster Profile")
-            st.caption("Average features per cluster")
-            cols_to_show = ['p_zero', 'cv', 'seasonal_strength', 'approx_entropy', 'trend_strength']
-            cols_to_show = [c for c in cols_to_show if c in filtered_results.columns]
-            
-            means = filtered_results.groupby('Cluster')[cols_to_show].mean()
-            st.dataframe(means.style.format("{:.2f}").background_gradient(cmap='Blues'), height=400)
+            st.plotly_chart(fig_pca_label, use_container_width=True)
 
-        # Pattern Distribution
+        with col_pca2:
+            fig_pca_cluster = px.scatter(
+                filtered_results, x='PCA1', y='PCA2', 
+                color='Cluster', 
+                hover_data=hover_cols,
+                color_discrete_sequence=px.colors.qualitative.Safe,
+                title="Color by Mathematical Cluster"
+            )
+            st.plotly_chart(fig_pca_cluster, use_container_width=True)
+
+        st.divider()
+        st.markdown("### 📊 Signal Distribution Analysis")
+        st.caption("Detailed breakdown of demand signals vs forecastability results.")
+
+        # --- Row 1: Pattern Distribution ---
         if has_pattern:
-            st.divider()
-            st.markdown("### 📊 Pattern Distribution")
+            st.markdown("#### 🔄 Demand Pattern Analysis")
             col_p1, col_p2 = st.columns(2)
-            
             with col_p1:
                 pattern_counts = filtered_results['Inferred_Pattern'].value_counts().reset_index()
                 pattern_counts.columns = ['Pattern', 'Count']
                 fig_pat = px.bar(pattern_counts, x='Pattern', y='Count', color='Pattern',
-                                title="Inferred Pattern Distribution")
+                                title="SKU Count by Pattern")
                 st.plotly_chart(fig_pat, use_container_width=True)
-            
             with col_p2:
-                # Pattern vs Forecastability cross-tab
-                cross = pd.crosstab(filtered_results['Inferred_Pattern'], 
+                cross_pat = pd.crosstab(filtered_results['Inferred_Pattern'], 
+                                       filtered_results['Forecastability_Label'])
+                fig_cross_pat = px.imshow(cross_pat, text_auto=True, color_continuous_scale='Blues',
+                                         title="Pattern × Forecastability")
+                st.plotly_chart(fig_cross_pat, use_container_width=True)
+
+        # --- Row 2: Cluster Distribution ---
+        st.markdown("#### 🧩 Cluster Distribution Analysis")
+        col_c1, col_c2 = st.columns(2)
+        with col_c1:
+            cluster_counts = filtered_results['Cluster'].value_counts().reset_index()
+            cluster_counts.columns = ['Cluster', 'Count']
+            cluster_counts['Cluster'] = cluster_counts['Cluster'].astype(str)
+            fig_clus = px.bar(cluster_counts, x='Cluster', y='Count', color='Cluster',
+                             title="SKU Count by Cluster")
+            st.plotly_chart(fig_clus, use_container_width=True)
+        with col_c2:
+            cross_clus = pd.crosstab(filtered_results['Cluster'], 
                                     filtered_results['Forecastability_Label'])
-                fig_cross = px.imshow(cross, text_auto=True, 
-                                     color_continuous_scale='Blues',
-                                     title="Pattern × Forecastability Heatmap")
-                st.plotly_chart(fig_cross, use_container_width=True)
+            fig_cross_clus = px.imshow(cross_clus, text_auto=True, color_continuous_scale='Greens',
+                                      title="Cluster × Forecastability")
+            st.plotly_chart(fig_cross_clus, use_container_width=True)
+
+        # --- Row 3: Score Bucket Distribution ---
+        if 'Score_Bucket' in filtered_results.columns:
+            st.markdown("#### 🏆 Rank Grade Analysis (Score Buckets)")
+            col_b1, col_b2 = st.columns(2)
+            with col_b1:
+                bucket_counts = filtered_results['Score_Bucket'].value_counts().reset_index()
+                bucket_counts.columns = ['Bucket', 'Count']
+                bucket_counts = bucket_counts.sort_values('Bucket')
+                fig_buck = px.bar(bucket_counts, x='Bucket', y='Count', color='Bucket',
+                                 title="SKU Count by Score Bucket")
+                st.plotly_chart(fig_buck, use_container_width=True)
+            with col_b2:
+                cross_buck = pd.crosstab(filtered_results['Score_Bucket'], 
+                                        filtered_results['Forecastability_Label'])
+                fig_cross_buck = px.imshow(cross_buck, text_auto=True, color_continuous_scale='Reds',
+                                          title="Score Bucket × Forecastability")
+                st.plotly_chart(fig_cross_buck, use_container_width=True)
+
+        # Original col_stats block (moved here)
+        st.divider()
+        st.subheader("Cluster Profile")
+        st.caption("Average features per cluster")
+        cols_to_show = ['p_zero', 'cv', 'seasonal_strength', 'approx_entropy', 'trend_strength']
+        cols_to_show = [c for c in cols_to_show if c in filtered_results.columns]
+        
+        means = filtered_results.groupby('Cluster')[cols_to_show].mean()
+        st.dataframe(means.style.format("{:.2f}").background_gradient(cmap='Blues'), height=400)
 
     # --- TAB 2: DRIVERS ---
     with tab_drivers:
