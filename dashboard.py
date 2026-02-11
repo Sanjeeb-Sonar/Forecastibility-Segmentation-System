@@ -136,13 +136,22 @@ with st.sidebar:
             selected_patterns = st.multiselect("Demand Pattern (Inferred)", all_patterns, default=all_patterns)
         else:
             selected_patterns = []
+
+        # 4. Score Bucket Filter
+        if 'Score_Bucket' in results_df.columns:
+            all_buckets = sorted(results_df['Score_Bucket'].astype(str).unique())
+            selected_buckets = st.multiselect("Score Bucket (Rank Grade)", all_buckets, default=all_buckets)
+        else:
+            selected_buckets = []
             
         # Apply Filters
         mask = (results_df['Forecastability_Label'].isin(selected_cats)) & \
                (results_df['Cluster'].isin(selected_clusters))
         
-        if selected_patterns and 'Inferred_Pattern' in results_df.columns:
+        if selected_patterns:
             mask = mask & (results_df['Inferred_Pattern'].isin(selected_patterns))
+        if selected_buckets:
+            mask = mask & (results_df['Score_Bucket'].isin(selected_buckets))
             
         filtered_results = results_df[mask]
         filtered_skus = filtered_results['SKU'].unique()
@@ -292,6 +301,35 @@ if filtered_results is not None:
         fig_hist.update_traces(opacity=0.5, line=dict(width=1))
         st.plotly_chart(fig_hist, use_container_width=True)
         
+        st.divider()
+        st.markdown("### 🧊 3D Feature Explorer")
+        st.caption("Interact with the raw feature space for selected SKUs. Choose any 3 metrics as axes.")
+        
+        # Identify numeric feature columns
+        exclude = ['Date', 'SKU', 'Cluster', 'Model_Used', 'Algorithm_Stability', 'PCA1', 'PCA2', 'Forecastability_Score', 'Forecastability_Label', 'Inferred_Pattern', 'Pattern_Confidence', 'Score_Bucket', 'Optimal_K']
+        feat_cols = [c for c in filtered_results.columns if c not in exclude and filtered_results[c].dtype in ['float64', 'int64', 'float32', 'int32']]
+        
+        if len(feat_cols) >= 3:
+            f1, f2, f3 = st.columns(3)
+            with f1: x_axis = st.selectbox("X Axis", feat_cols, index=feat_cols.index('cv') if 'cv' in feat_cols else 0, key='x3d')
+            with f2: y_axis = st.selectbox("Y Axis", feat_cols, index=feat_cols.index('adi') if 'adi' in feat_cols else 1, key='y3d')
+            with f3: z_axis = st.selectbox("Z Axis", feat_cols, index=feat_cols.index('seasonal_strength') if 'seasonal_strength' in feat_cols else 2, key='z3d')
+            
+            fig_3d = px.scatter_3d(
+                filtered_results, 
+                x=x_axis, y=y_axis, z=z_axis,
+                color='Forecastability_Label',
+                symbol='Cluster',
+                hover_data=['SKU', 'Inferred_Pattern', 'Score_Bucket'],
+                color_discrete_map={'Easy': '#00CC96', 'Moderate': '#FFA15A', 'Hard': '#EF553B'},
+                opacity=0.8,
+                title=f"3D Analysis: {x_axis} vs {y_axis} vs {z_axis}"
+            )
+            fig_3d.update_layout(margin=dict(l=0, r=0, b=0, t=50), scene=dict(aspectmode='cube'))
+            st.plotly_chart(fig_3d, use_container_width=True)
+        else:
+            st.info("Not enough numeric features found for 3D analysis.")
+
         st.divider()
         st.subheader("Individual Drill-down")
         sel_sku = st.selectbox("Select SKU:", filtered_skus)
