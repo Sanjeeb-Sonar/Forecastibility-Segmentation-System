@@ -50,18 +50,24 @@ This script will:
 
 ## 📊 Methodology
 
-The system assesses forecastability by analyzing:
-1.  **Demand Patterns**: Is the demand continuous or intermittent? (ADI/CV²)
-2.  **Signal Strength**: How strong are the Trend and Seasonality components? (STL Decomposition)
-3.  **Noise & Entropy**: How random is the series? (Spectral Entropy, Volatility)
-
-Clusters are labeled as **Easy**, **Moderate**, or **Hard** based on a composite score derived from these features.
+The system assesses forecastability in 4 distinct inference stages:
+1.  **Pattern Inference**: Detects archetypes (Smooth, Seasonal, Intermittent, etc.) using multi-signal weights from all 35 features.
+2.  **Cluster Inference**: Segments SKUs into natural groupings using GMM and KMeans with bootstrap stability validation.
+3.  **Score Inference**: Computes a balanced "Forecastability Score" based on feature polarity (Higher = Easier to forecast).
+4.  **Label Inference**: Categorizes clusters into **Easy**, **Moderate**, or **Hard** based on score rankings.
 
 ## 📁 Project Structure
 
-*   `dashboard.py`: Streamlit application code.
-*   `feature_extraction.py`: Engine for calculating time series metrics.
-*   `segmentation.py`: Clustering logic (K-Means/GMM/Agglomerative).
-*   `forecastability.py`: Logic for scoring and labeling SKUs.
-*   `data_generator.py`: Creates synthetic retail sales data for testing.
-*   `main.py`: Orchestrator script for the batch pipeline.
+1.  **`data_generator.py`**: Generates 3-column raw sales data (`Date, SKU, Sales`).
+2.  **`feature_extraction.py`**: Pure 35-feature extraction engine.
+3.  **`pattern_inference.py`**: Robust multi-signal demand pattern classification.
+4.  **`segmentation.py`**: Multi-algorithm cluster segmentation engine.
+5.  **`forecast_score.py`**: Composite forecastability scoring and labeling.
+6.  **`main.py`**: CLI orchestrator for the full 7-step pipeline.
+7.  **`dashboard.py`**: Interactive Streamlit application.
+
+Support modules:
+*   `methodology.py`: Report generation logic.
+*   `visualization.py`: Static chart generation logic.
+*   `requirements.txt`: Dependencies.
+*   `run_dashboard.bat`: Windows shortcut.
