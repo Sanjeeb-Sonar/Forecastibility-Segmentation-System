@@ -32,9 +32,11 @@ Our system extracts **35 features** across **11 dimensions** to capture a "High 
 
 ### Stage 3: Robust Segmentation (Clustering Ensemble)
 *   **Multi-Algorithm Sweep**: We run **K-Means**, **Gaussian Mixture Models (GMM)**, and **Agglomerative Clustering** for $K \in [2, 8]$.
-*   **Metric Optimization**: We calculate **Silhouette**, **Calinski-Harabasz**, and **Davies-Bouldin** scores.
-*   **Stability Threshold**: We run **20 Bootstrap Iterations** (subsampling 80% of data).
-*   **Final selection formula**: `0.6 * Silhouette_Score + 0.4 * Bootstrap_Stability_Score`.
+*   **Recursive Divisive Splitting (The 10% Rule)**: 
+    *   To ensure high-resolution portfolio management, no segment is allowed to contain more than **10% of total SKUs**.
+    *   If a cluster exceeds this threshold, the engine recursively triggers a "sub-split" using K-Means (K=2) until all final segments satisfy the size constraint.
+    *   This prevents "mega-clusters" from hiding diverse behaviors.
+*   **Stability Threshold**: We run **Bootstrap Stability** checks to ensure groups are reliable.
 
 ### Stage 4: Pattern Inference Logic (Sigmoid Rules)
 We use a **Weighted Multi-Signal Evidence Scoring** system. Each feature's contribution is put through a **Sigmoid Activation Function**:

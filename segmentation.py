@@ -25,9 +25,9 @@ class SegmentationEngine:
 
     def run_segmentation(self, features_df, sku_col='SKU'):
         """
-        Pure clustering engine.
-        Input: DataFrame with SKU + numeric features (may include Inferred_Pattern, Pattern_Confidence)
-        Output: DataFrame with 'Cluster', 'PCA1', 'PCA2', 'Model_Used', 'Algorithm_Stability' added.
+        Pure clustering engine with size constraints (<10% per cluster).
+        Input: DataFrame with SKU + numeric features
+        Output: DataFrame with 'Cluster', 'PCA1', 'PCA2', etc.
         """
         skus = features_df[sku_col].values
         
@@ -39,11 +39,9 @@ class SegmentationEngine:
             
         X_raw = features_df.drop(columns=non_feature_cols, errors='ignore').select_dtypes(include=[np.number]).values
         
-        # 1. Preprocessing: Scale + Outlier Capping
+        # 1. Preprocessing
         print("Preprocessing features...")
         X_scaled = self.scaler.fit_transform(X_raw)
-        
-        # Cap outliers at 3 sigma
         X_scaled = np.clip(X_scaled, -3, 3)
         
         # PCA for noise reduction (keep 90% variance)
@@ -51,113 +49,87 @@ class SegmentationEngine:
         X_pca = self.pca.fit_transform(X_scaled)
         print(f"PCA reduced dimensions from {X_raw.shape[1]} to {X_pca.shape[1]} (90% variance)")
         
-        # 2. Multi-Algorithm & Multi-Metric Sweep
-        print(f"Sweeping K={self.min_k}..{self.max_k} across 3 algorithms...")
+        # 2. Recursive Divisive Clustering
+        max_allowed_size = int(np.ceil(len(features_df) * 0.10))
+        print(f"Targeting max cluster size: {max_allowed_size} SKUs (10% of {len(features_df)})")
         
-        best_overall_score = -1
-        final_k = -1
+        # Initial Clustering
+        labels = self._find_best_clusters(X_pca)
         
-        algos = {
-            'KMeans': KMeans,
-            'Agglomerative': AgglomerativeClustering,
-            'GMM': GaussianMixture
-        }
+        # Iteratively split large clusters
+        final_labels = labels.copy()
+        current_max_id = np.max(final_labels)
+        
+        for iteration in range(5): # Safety limit for recursions
+            unique_clusters = np.unique(final_labels)
+            clusters_to_split = []
+            
+            for c in unique_clusters:
+                size = np.sum(final_labels == c)
+                if size > max_allowed_size:
+                    clusters_to_split.append(c)
+            
+            if not clusters_to_split:
+                break
+                
+            print(f"Iteration {iteration+1}: Splitting {len(clusters_to_split)} large clusters...")
+            
+            for c in clusters_to_split:
+                indices = np.where(final_labels == c)[0]
+                X_sub = X_pca[indices]
+                
+                # Split the large cluster into 2 smaller ones
+                sub_model = KMeans(n_clusters=2, random_state=42, n_init=10)
+                sub_labels = sub_model.fit_predict(X_sub)
+                
+                # Assign new IDs
+                final_labels[indices[sub_labels == 1]] = current_max_id + 1
+                current_max_id += 1
+                
+        # 3. Build result
+        result_df = features_df.copy()
+        result_df['Cluster'] = final_labels
+        result_df['Model_Used'] = self.best_algo_name
+        result_df['PCA1'] = X_pca[:, 0]
+        result_df['PCA2'] = X_pca[:, 1]
+        
+        print(f"Final Clustering: {len(np.unique(final_labels))} clusters created.")
+        return result_df
+
+    def _find_best_clusters(self, X_pca):
+        """Helper to run the multi-algorithm sweep and pick best initial K."""
+        self.results_summary = {}
+        algos = {'KMeans': KMeans, 'Agglomerative': AgglomerativeClustering, 'GMM': GaussianMixture}
         
         for k in range(self.min_k, self.max_k + 1):
             for name, AlgoClass in algos.items():
-                if name == 'GMM':
-                    model = AlgoClass(n_components=k, random_state=42)
-                    labels = model.fit_predict(X_pca)
-                elif name == 'Agglomerative':
-                    model = AlgoClass(n_clusters=k)
-                    labels = model.fit_predict(X_pca)
-                else:
-                    model = AlgoClass(n_clusters=k, random_state=42, n_init=10)
-                    labels = model.fit_predict(X_pca)
+                if name == 'GMM': model = AlgoClass(n_components=k, random_state=42)
+                elif name == 'Agglomerative': model = AlgoClass(n_clusters=k)
+                else: model = AlgoClass(n_clusters=k, random_state=42, n_init=10)
                 
+                labels = model.fit_predict(X_pca)
                 sil = silhouette_score(X_pca, labels)
                 ch = calinski_harabasz_score(X_pca, labels)
                 db = davies_bouldin_score(X_pca, labels)
-                
                 self.results_summary.setdefault(name, []).append({
                     'k': k, 'sil': sil, 'ch': ch, 'db': db
                 })
 
-        # 3. Select Best K per Algorithm
         algo_best_k = {}
         for name, rows in self.results_summary.items():
             rows.sort(key=lambda x: x['sil'], reverse=True)
             algo_best_k[name] = rows[0]
             
-        print("Best K per algorithm:", {k: v['k'] for k, v in algo_best_k.items()})
-        
-        # 4. Bootstrap Stability Check
-        print("Running bootstrap stability analysis...")
-        algo_stability = {}
-        
-        for name, best_res in algo_best_k.items():
-            k = best_res['k']
-            stability_scores = []
-            
-            for i in range(self.n_bootstrap):
-                indices = np.random.choice(len(X_pca), int(len(X_pca)*0.8), replace=False)
-                X_sample = X_pca[indices]
-                
-                if name == 'GMM':
-                    model = GaussianMixture(n_components=k, random_state=i)
-                elif name == 'Agglomerative':
-                    model = AgglomerativeClustering(n_clusters=k)
-                else:
-                    model = KMeans(n_clusters=k, random_state=i, n_init=10)
-                    
-                try:
-                    labels = model.fit_predict(X_sample)
-                    if len(np.unique(labels)) > 1:
-                        stability_scores.append(silhouette_score(X_sample, labels))
-                    else:
-                        stability_scores.append(0)
-                except:
-                    stability_scores.append(0)
-            
-            algo_stability[name] = np.mean(stability_scores)
-            
-        # 5. Final Selection: Silhouette (60%) + Stability (40%)
-        final_scores = {}
-        for name in algo_best_k:
-            final_scores[name] = (algo_best_k[name]['sil'] * 0.6) + (algo_stability[name] * 0.4)
-            
-        best_algo_name = max(final_scores, key=final_scores.get)
-        best_k = algo_best_k[best_algo_name]['k']
-        
-        print(f"Winner: {best_algo_name} with K={best_k} (Score: {final_scores[best_algo_name]:.3f})")
-        
-        # Fit final model
-        if best_algo_name == 'GMM':
-            model = GaussianMixture(n_components=best_k, random_state=42)
-            labels = model.fit_predict(X_pca)
-        elif best_algo_name == 'Agglomerative':
-            model = AgglomerativeClustering(n_clusters=best_k)
-            labels = model.fit_predict(X_pca)
-        else:
-            model = KMeans(n_clusters=best_k, verbose=0, random_state=42, n_init=10)
-            labels = model.fit_predict(X_pca)
-            
-        self.best_model = model
-        self.best_k = best_k
-        self.best_labels = labels
+        # Select winner based on simple silhouette for initial phase
+        best_algo_name = max(algo_best_k, key=lambda x: algo_best_k[x]['sil'])
         self.best_algo_name = best_algo_name
+        k = algo_best_k[best_algo_name]['k']
         
-        # Build result
-        result_df = features_df.copy()
-        result_df['Cluster'] = labels
-        result_df['Model_Used'] = best_algo_name
-        result_df['Algorithm_Stability'] = algo_stability[best_algo_name]
+        if best_algo_name == 'GMM': mod = GaussianMixture(n_components=k, random_state=42)
+        elif best_algo_name == 'Agglomerative': mod = AgglomerativeClustering(n_clusters=k)
+        else: mod = KMeans(n_clusters=k, random_state=42, n_init=10)
         
-        # Add PCA coordinates for visualization
-        result_df['PCA1'] = X_pca[:, 0]
-        result_df['PCA2'] = X_pca[:, 1]
-        
-        return result_df
+        return mod.fit_predict(X_pca)
 
 if __name__ == "__main__":
     try:
@@ -172,4 +144,3 @@ if __name__ == "__main__":
         print("Saved to segmentation_output.csv")
     except Exception as e:
         print(f"Test failed: {e}")
-
