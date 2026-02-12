@@ -63,11 +63,21 @@ Every feature is a "vote."
 *   If a product has **High Seasonality**, it gets a **+1 vote** (Points Up!).
 *   If a product is **Highly Random**, it gets a **-1 vote** (Points Down!).
 
-### The Final Grade
-After counting all the votes and comparing the product to its "friends" in the same group, we get a final score:
-*   **Easy (4+ Points)**: These are the "Straight-A" students. Very predictable.
-*   **Moderate (2-3 Points)**: The "Average" students. Mostly predictable.
-*   **Hard (Under 2 Points)**: The "Troublemakers." Very hard to guess.
+### The Final Grade (The "Points Equation")
+To find the final label, the computer combines three different signals:
+1.  **The Base Score (0 to 3 Points)**: Based on where the SKU ranks against others in the portfolio (Quartile ranking).
+2.  **The Pattern Bonus/Penalty (+1 or -1)**: 
+    *   **+1 Bonus**: If the product is "Smooth," "Seasonal," or "Trending."
+    *   **-1 Penalty**: If the product is "Lumpy," "Intermittent," or "Erratic."
+3.  **The Cluster Rank (+1, 0, or -1)**: 
+    *   The computer looks at the "group of friends" (cluster) the product belongs to. 
+    *   If the whole group is very good, it gets **+1**. 
+    *   If the group is the worst performing, it gets **-1**.
+
+**Final Math:**
+*   **Easy (4+ Total Points)**: High-scoring products that also have a good pattern and a good cluster.
+*   **Moderate (2-3 Total Points)**: Average performers or good ones with one "bad sign."
+*   **Hard (Under 2 Total Points)**: These usually have bad scores, bad patterns, and belong to "messy" clusters.
 
 ---
 
