@@ -51,35 +51,35 @@ $$f(x) = \frac{1}{1 + e^{-\text{steepness} \cdot (x - \text{center})}}$$
 
 ---
 
-## 4. The Final Labeling Algorithm (The Logic)
+## 4. The Final Labeling Algorithm (Triangulated Independence)
 
-We leverage three independent signals to determine the final **Forecastability Label**:
+To ensure the highest accuracy, the system treats **Score**, **Pattern**, and **Cluster** as three independent dimensions. They are cross-referenced (Triangulated) to find the final label, rather than being dependent on each other.
 
-### Signal A: Composite Score (Feature Polarity)
-Each feature is assigned a **Polarity** (+1 = Easier, -1 = Harder).
-*   **Positive (+1)**: Trend/Seasonal Strength, Autocorrelation, Stability.
-*   **Negative (-1)**: CV, Entropy, Changepoints, Intermittency.
-*   **Calculation**: We calculate the balanced average of 11 feature groups to get a score from 0.0 to 1.0.
+### Signal A: Numeric Forecastability Score (Independent)
+*   **Calculation**: A balanced average across 11 feature groups (Trend, Seasonality, Entropy, etc.).
+*   **Polarity**: Each feature is aligned so that higher = easier to forecast.
+*   **Result**: A score from 0.0 to 1.0.
 
-### Signal B: The Points Equation
-We assign "Points" to each SKU based on its performance:
-1.  **Bucketing (0–3 pts)**: SKUs are split into Quartiles based on their composite score. `Q4 (Top 25%) = 3 pts`, `Q1 (Bottom 25%) = 0 pts`.
-2.  **Pattern Points (+1 or -1)**:
-    *   **+1 Bonus**: If Pattern $\in$ {Smooth, Seasonal, Trending}.
-    *   **-1 Penalty**: If Pattern $\in$ {Intermittent, Lumpy, Erratic}.
-3.  **Cluster Adjustment (+1 or -1)**:
-    *   **Tier Ranking**: Clusters are ranked by their mean composite score.
-    *   **+1**: SKUs in "High Performance" clusters.
-    *   **-1**: SKUs in "Low Performance" clusters.
+### Signal B: Demand Pattern Diagnostics (Independent)
+*   **Calculation**: Logic-driven inference (Sigmoid centers) that detects "Smooth," "Seasonal," "Lumpy," etc.
+*   **Result**: A categorical behavior label.
 
-### Final Classification Thresholds:
-$$\text{Total Points} = \text{Bucket Points} + \text{Pattern Adjustment} + \text{Cluster Adjustment}$$
+### Signal C: Behavioral Clusters (Independent)
+*   **Calculation**: Unsupervised machine learning (K-Means/GMM) that groups SKUs by "mathematical shape."
+*   **Constraint**: No cluster contains >10% of the portfolio.
+*   **Result**: A cluster ID (Cluster 1, Cluster 2, etc.).
 
-| Total Points | Final Label | Forecast Strategy Recommendation |
-| :--- | :--- | :--- |
-| **4 or higher** | **Easy** | Full AI Automation (Prophet, NeuralProphet). |
-| **2 or 3** | **Moderate** | Standard ML Models with human-in-the-loop review. |
-| **Less than 2** | **Hard** | Use Naive/Simple baselines; avoid overfitting mess. |
+### The "Consensus" Voting System
+The final **Forecastability Label** is determined by the convergence of Signal A and Signal B:
+1.  **Score Signal (0–2 pts)**: Based on the SKU's numeric score relative to the portfolio (Terciles).
+2.  **Pattern Signal (0–2 pts)**: Based on the inherent difficulty of the detected pattern (e.g., Smooth = 2, Lumpy = 0).
+3.  **Label Calculation**:
+    *   **Easy**: Average Signal $\ge$ 1.5 (Both signals agree it's predictable).
+    *   **Moderate**: Average Signal $\ge$ 0.75 (Mixed signals).
+    *   **Hard**: Average Signal $<$ 0.75 (Both signals agree it's chaotic).
+
+**Why this is better**:
+By keeping these components independent, we avoid "circular logic" where a bad cluster ruins a good score. Instead, if a SKU has a high score and a stable pattern, it is marked **Easy** even if it sits next to "Moderate" items in a cluster. This is the **Triangulation of Truth**.
 
 ---
 

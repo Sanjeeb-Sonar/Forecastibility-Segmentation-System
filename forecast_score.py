@@ -73,7 +73,7 @@ class ForecastScoreEngine:
         """
         df = input_df.copy()
 
-        # 1. Compute Composite Score Per SKU (Same as before)
+        # 1. Compute Composite Score Per SKU (0.0 to 1.0)
         scaler = MinMaxScaler()
         feature_cols = [c for c in df.columns if c in self.feature_polarity]
 
@@ -98,49 +98,34 @@ class ForecastScoreEngine:
 
         df['Forecastability_Score'] = scores
 
-        # 2. SCENARIO A: Score Buckets (Quartiles)
-        # Q1 = Hardest (Low score), Q4 = Easiest (High score)
-        df['Score_Bucket'] = pd.qcut(df['Forecastability_Score'], 4, labels=['Q1', 'Q2', 'Q3', 'Q4'])
-        
-        # Point mapping for Bucket
-        bucket_points = {'Q1': 0, 'Q2': 1, 'Q3': 2, 'Q4': 3}
+        # --- INDEPENDENT TRIANGULATION LOGIC ---
 
-        # 3. SCENARIO B: Pattern Points
-        # Weights for patterns based on inherent difficulty
-        pattern_points_map = {
-            'Smooth': 1, 'Seasonal': 1, 'Trending': 1,
-            'Intermittent': -1, 'Lumpy': -1, 'Erratic': -1,
-            'New_Product': 0
+        # 2. SIGNAL 1: Score Points (0 to 2)
+        # We use Terciles for a clean low/mid/high split representing the numeric score signal.
+        df['Score_Tier'] = pd.qcut(df['Forecastability_Score'], 3, labels=[0, 1, 2]).astype(int)
+        
+        # 3. SIGNAL 2: Pattern Points (0 to 2)
+        # We map patterns to difficulty levels independently.
+        pattern_signal_map = {
+            'Smooth': 2, 'Seasonal': 2, 'Trending': 1,
+            'New_Product': 1,
+            'Intermittent': 0, 'Lumpy': 0, 'Erratic': 0
         }
+        df['Pattern_Signal'] = df.get('Inferred_Pattern', 'Erratic').map(pattern_signal_map).fillna(0).astype(int)
         
-        # 4. SCENARIO C: Cluster Points
-        # Rank clusters by mean score
-        cluster_means = df.groupby(cluster_col)['Forecastability_Score'].mean()
-        sorted_clusters = cluster_means.sort_values(ascending=False).index.tolist()
-        
-        n_clusters = len(sorted_clusters)
-        top_split = int(np.ceil(n_clusters / 3))
-        bot_split = n_clusters - top_split
-        
-        cluster_points_map = {}
-        for i, c in enumerate(sorted_clusters):
-            if i < top_split:
-                cluster_points_map[c] = 1 # Top tier
-            elif i >= bot_split:
-                cluster_points_map[c] = -1 # Bottom tier
-            else:
-                cluster_points_map[c] = 0 # Mid tier
+        # 4. SIGNAL 3: Cluster Integrity (Simplified)
+        # We use the raw Cluster ID as a context marker without ranking it by score.
+        # This keeps the grouping signal purely about "behavioral shape."
 
-        # 5. COMBINE SCENARIOS
+        # 5. CROSS-VALIDATION LABELING (Triangulation)
         def calculate_label(row):
-            pts = bucket_points.get(row['Score_Bucket'], 0) # Base points (0-3)
-            pts += pattern_points_map.get(row.get('Inferred_Pattern', 'Erratic'), -1) # Pattern adjustment
-            pts += cluster_points_map.get(row[cluster_col], 0) # Cluster adjustment
+            # We take the AVERAGE of Score and Pattern signals.
+            # If they both agree, the label is strong. If they differ, it becomes Moderate.
+            avg_signal = (row['Score_Tier'] + row['Pattern_Signal']) / 2
             
-            # Final thresholding
-            if pts >= 4:
+            if avg_signal >= 1.5:
                 return 'Easy'
-            elif pts >= 2:
+            elif avg_signal >= 0.75:
                 return 'Moderate'
             else:
                 return 'Hard'
@@ -148,7 +133,7 @@ class ForecastScoreEngine:
         df['Forecastability_Label'] = df.apply(calculate_label, axis=1)
 
         # 6. Validate with ANOVA F-stat
-        print("Validating with ANOVA F-stats...")
+        print("Validating Independent Labels with ANOVA...")
         anova_results = []
         groups = [df[df['Forecastability_Label'] == label] for label in ['Easy', 'Moderate', 'Hard']]
         groups = [g for g in groups if len(g) > 0]
